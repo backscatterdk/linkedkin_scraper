@@ -1,27 +1,28 @@
-""" 
-Main script file.
-""" 
+"""Main script file."""
+
 
 import codecs
-import csv
 import html
 import json
-import os
-import pandas as pd
-import random
-import re
-import requests
-import selenium
 import sys
 import time
-import tqdm
+import os
+import random
+import re
 from collections import Counter
+from urllib.request import urlopen
+import pandas as pd
+import requests
+import tqdm
 from selenium.webdriver import Chrome
 from selenium.webdriver.common.keys import Keys
-from urllib.request import urlopen
+from io import BytesIO
+from zipfile import ZipFile
+from packaging import version
 
 
 def get_mask(mask_tokens):
+    """doc"""
     global token_num
     token = mask_tokens[token_num]
     if len(set(token)) < 8:
@@ -32,6 +33,7 @@ def get_mask(mask_tokens):
 
 
 def mask_login(user, password):
+    """doc"""
     global token_num
     # mash login details with poetry
     urls = [
@@ -60,6 +62,7 @@ def mask_login(user, password):
 
 
 def load_details():
+    """doc"""
     global token_num
     mask = codecs.open('script_requisites/mask_poetry', 'r', 'utf-8').read()
     mask_tokens = mask.split()
@@ -83,7 +86,7 @@ def load_details():
 
 
 def password_prompt():
-    # Get login details
+    """Get login details"""
     print('Input your login details:\n')
     user = input('username: \t')
     password = input('password: \t')
@@ -94,7 +97,7 @@ def password_prompt():
 
 
 def get_auth_details():
-    "This function will load login details if present or prompt user for them."
+    """This function will load login details if present or prompt user for them."""
     # check if auth file exists
     if os.path.isfile('script_requisites/a_u_t_h_details'):
         # Check if user wants to renew the login details
@@ -125,68 +128,51 @@ def get_auth_details():
     return user, password
 
 
-# Import selenium and initialize browser
-# Install chrome
 def get_version(link):
-    version = re.findall('[0-9]+[.][0-9]+', link)
-    if len(version) > 0:
-        return float(version[0])
-    else:
-        return 0
+    """
+    Import selenium and initialize browser
+    Install chrome
+    """
+    chrome_version = re.findall('(?:\d+\.?)+', link)[0]
+    parsed_version = version.parse(chrome_version)
+    return str(parsed_version)
 
 
 def download_latest_chrome():
-    from io import BytesIO
-    from zipfile import ZipFile
 
     # find link to latest version
     response = requests.get('http://chromedriver.chromium.org/downloads')
     html = response.text
     links = re.findall(
-        r'https://chromedriver.storage.googleapis.com/index.html\?path=[0-9.]+',
+        r'https:\/\/chromedriver\.storage\.googleapis\.com\/index\.html\?path=[0-9.]*/',
         html)
     link = max(links, key=get_version)
-    version = get_version(link)
+
+    chrome_version = get_version(link)
+
     osname = sys.platform
     if osname not in set(['win32', 'mac64', 'linux64']):
         if osname == 'darwin':
             osname = 'mac64'
         if 'win' in osname:
             osname = 'win32'
+        if osname == 'linux':
+            osname = 'linux64'
 
     # create link from version and operating system name
-    zip_path = 'https://chromedriver.storage.googleapis.com/%r/chromedriver_%s.zip' % (
-        version, osname)
+    zip_path = f'https://chromedriver.storage.googleapis.com/{chrome_version}/chromedriver_{osname}.zip'
+
+    #####
+    # This is just a hack to download the corrext driver
+    zip_path = 'https://chromedriver.storage.googleapis.com/77.0.3865.40/chromedriver_linux64.zip'
+    #####
+
     # download driver.
     response = urlopen(zip_path)
     # unpack zip and dump chromedriver
     myzipfile = ZipFile(BytesIO(response.read()))
-    myzipfile.extractall(path='script_requisites/')
-
-
-def get_chrome_file():
-    path = 'script_requisites/'
-    files = [path + i for i in os.listdir(path) if 'chromedriver' in i]
-    return files
-
-
-def get_chrome_path():
-    files = get_chrome_file()
-    if len(files) == 0:
-        # download files
-        download_latest_chrome()
-        files = get_chrome_file()
-        if len(files) == 0:
-            print(
-                '''Please download latest version of the chrome driver at the following link:
-            http://chromedriver.chromium.org/downloads
-            Unpack and put the file in the script_requisites directory. Then re-run the script.
-            ''')
-            import sys
-            sys.exit()
-        return files[0]
-    else:
-        return files[0]
+    download_path = 'script_requisites/'
+    myzipfile.extractall(path=download_path)
 
 
 # Inform user on potential problems with Selenium get_version
@@ -206,12 +192,11 @@ def check_selenium_version():
 
 def login(driver, u, p):
     input_nodes = driver.find_elements_by_tag_name('input')
-    # print(len(input_nodes))
     for node in input_nodes:
         class_name = node.get_attribute('class')
         if class_name == 'login-email':
             node.send_keys(u)
-        elif 'login-email' in class_name:
+        elif 'session_key' in class_name:
             node.send_keys(u)
 
         if class_name == 'login-password':
@@ -1027,7 +1012,6 @@ def collect_data(terms):
                 list(profiles_collected), open(
                     'logs/profiles_collected', 'w'))
             # write to profile_log
-            
 
 
 ###########STARTBLOCK1#######################
@@ -1060,7 +1044,7 @@ u, p = get_auth_details()
 ###########ENDBLOCK2#######################
 
 ###########STARTBLOCK3#######################
-chrome_path = get_chrome_path()
+chrome_path = "/usr/bin/chromedriver"
 ###########ENDBLOCK3#######################
 
 ###########STARTBLOCK4#######################
@@ -1212,6 +1196,3 @@ if not os.path.isfile('logs/profile_log.csv'):
 else:
     logf = open('logs/profile_log.csv', 'a')
 ###########ENDBLOCK12#######################
-
-test_var = True
-
