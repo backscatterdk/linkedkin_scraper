@@ -1,66 +1,19 @@
-"""Main script file."""
-
+'''
+The program searches linkedin for searchterms
+defined in an external newline-separeted textfile
+(script_requisites/search_terms) or through user_input
+'''
 
 import codecs
 import html
 import json
-import sys
 import time
 import os
 import random
 import re
-from collections import Counter
-from urllib.request import urlopen
 import pandas as pd
-import requests
 import tqdm
 from selenium.webdriver import Chrome
-from selenium.webdriver.common.keys import Keys
-from io import BytesIO
-from zipfile import ZipFile
-from packaging import version
-
-
-# Inform user on potential problems with Selenium get_version
-def check_selenium_version():
-    import selenium
-    response = requests.get('https://pypi.org/project/selenium/')
-    html = response.text
-    latest_version = re.findall('selenium ([0-9.]+)', html)[0]
-    current_version = selenium.__version__
-    if latest_version != current_version:
-        print(
-            '''You are currently running an outdated version of selenium.\n Latest version being: %s\t Your version: %s
-        If you experience problems with Selenium try to update it using pip.''' %
-            (latest_version, current_version))
-    return latest_version == current_version
-
-
-def login(driver, u, p):
-    input_nodes = driver.find_elements_by_tag_name('input')
-    for node in input_nodes:
-        class_name = node.get_attribute('class')
-        if class_name == 'login-email':
-            node.send_keys(u)
-        elif 'session_key' in class_name:
-            node.send_keys(u)
-
-        if class_name == 'login-password':
-            node.send_keys(p)
-        elif 'login-password' in class_name:
-            node.send_keys(p)
-    # locate submit button and click it
-    for node in input_nodes:
-        class_name = node.get_attribute('class')
-        if class_name == 'login submit-button':
-            node.click()
-            break
-    # Check if login is succesfull.
-    time.sleep(5)  # wait for the page to load.
-    html = driver.page_source
-    if 'Forgot password?' in html:
-        print('Login was unsuccesful, do it manually or rerun the script and change the login info.')
-        # sys.exit()
 
 
 def load_dataframe(filename):
@@ -75,11 +28,11 @@ def load_dataframe(filename):
 
 
 def network_monitor_on(driver):
-    global windows
+    global WINDOWS
     driver.execute_script('''window.open("");''')
     # open window and hit the chrome://net-internals/#events
     new_window = driver.window_handles[-1]
-    windows['network_monitor'] = new_window
+    WINDOWS['network_monitor'] = new_window
     # turn full logging on
     full_log_on(driver)
 
@@ -95,7 +48,7 @@ def capture_bytes(driver):
 
 def full_log_on(driver):
     old_window = driver.current_window_handle
-    driver.switch_to.window(windows['network_monitor'])
+    driver.switch_to.window(WINDOWS['network_monitor'])
     # navigate to capture and turn on full log
     driver.get('chrome://net-internals/#capture')
     time.sleep(4)
@@ -114,24 +67,205 @@ def clear_network_monitor(driver):
     # Clear network monitor
     # by refreshing
     old_window = driver.current_window_handle
-    driver.switch_to.window(windows['network_monitor'])
+    driver.switch_to.window(WINDOWS['network_monitor'])
     driver.refresh()
     driver.switch_to.window(old_window)
 
 
 def open_profile_window(driver):
-    global windows
+    global WINDOWS
 
     driver.execute_script('''window.open("");''')
 
     new_window = driver.window_handles[-1]
-    windows['profiles'] = new_window
+    WINDOWS['profiles'] = new_window
+
+# Automated browsing of pages and searching.
+# Enter the Recruiter search domain.
 
 
-######## DATA COLLECTION FUNCTIONS #######
-# FUnction for normalizing data
+def start_recruiter_search(driver):
+    success = False
+    for button in driver.find_elements_by_tag_name('button'):
+        if button.text == 'Start a new search':
+            button.click()
+            success = True
+            break
+    return success
 
+
+def choose_custom_filter(driver, filter_name='denmark_only'):
+    if 'Filter is selected' in driver.page_source:
+        return
+    for el in driver.find_elements_by_tag_name('button'):
+        if 'Custom filters' in el.text:
+            el.click()
+
+    filter_on = False
+    for el in driver.find_elements_by_tag_name('button'):
+        try:
+            if filter_name == el.text:
+                el.click()
+                filter_on = True
+                break
+        except BaseException:
+            pass
+
+    if not filter_on:
+        # check if filter was already on:
+        if not 'Filter is selected' in driver.page_source:
+            input(
+                'Applying custom filter did not succeed, input it manually, and Press Enter')
+        # Should make a warning sound.
+
+
+def input_searchterm(driver, term, custom_filter='denmark_only'):
+    driver.switch_to.window(WINDOWS['recruiter'])
+    # try to enter the search.
+    success = False
+    for i in range(5):
+        try:
+            success = start_recruiter_search(driver)
+            break
+        except BaseException:
+            continue
+        if success:
+            break
+        else:
+            time.sleep(2)
+    # if not success:
+    #    input('Automation of search: %s failed. I need you to do it manually and press Enter when ready.'%term)
+    # check if filter was already on:
+   # if not 'Filter is selected' in driver.page_source:
+    #    choose_custom_filter(driver,custom_filter)
+    success = False
+    for el in driver.find_elements_by_tag_name('input'):
+        try:
+            el.clear()
+            el.send_keys(term)
+            el.submit()
+            success = True
+            break
+        except BaseException:
+            continue
+    time.sleep(2)
+    print('will now apply the following filter: %s' % custom_filter)
+    if not 'Filter is selected' in driver.page_source:
+        choose_custom_filter(driver, custom_filter)
+    if not success:
+        input('Automation of search failed. I need you to do it manually and press Enter when ready.')
+        return
+
+
+def page_link(driver):
+    driver.switch_to.window(WINDOWS['recruiter'])
+    success = False
+    for el in driver.find_elements_by_class_name('page-link'):
+        try:
+            title = el.get_attribute('title')
+        except BaseException:
+            title = ''
+        if 'next' in title.lower():
+            # print(title)
+            for i in range(5):
+                try:
+                    el.click()
+                    success = True
+                except BaseException:
+                    pass
+
+            if success:
+                break
+    return success
+
+
+def search_results(driver, term, custom_filter='denmark_only', user_defined=False):
+    print('Now collecting searchterm: %s' % term)
+    if not user_defined:
+
+        input_searchterm(driver, term, custom_filter)
+
+        # print('will just use current filter')
+    else:
+        input(
+            'Define your own custom search using the following term: %s\n and press Enter when ready.' %
+            term)
+
+    time.sleep(2)
+    #
+    links = get_profile_links(driver)
+
+    # get data
+    if NETWORK:
+        data = [get_results(driver)]
+        clear_log(driver)
+    else:
+        data = []
+    for page in range(int(N_SEARCH_RESULTS / 25)):
+        time.sleep(1)
+        for _ in range(5):  # another quickfix..
+            try:
+                success = page_link(driver)
+
+                break
+            except BaseException:
+                print('paging error, will try again')
+                success = False
+        if success:
+            print('Success paging %d' % page)
+            if NETWORK:
+                data.append(get_results(driver))
+                clear_log(driver)
+            links.update(get_profile_links(driver))
+        else:
+            print('Error paging %d' % page)
+
+            # break
+
+    # get data for no cap: ## GIVER DET MENING?
+    if term.lower() != term:
+        print('Now collecting searchterm(no_caps): %s' % term.lower())
+        if not user_defined:
+            input_searchterm(driver, term.lower())
+        else:
+            input(
+                'Define your own custom search using the following term: %s\n and press Enter when ready.' %
+                term.lower())
+
+        time.sleep(2)
+        links.update(get_profile_links(driver))
+        # get data
+        if NETWORK:
+            data.append(get_results(driver))
+            # clear_log
+            clear_log(driver)
+        for page in range(int(N_SEARCH_RESULTS / 25)):
+            time.sleep(1)
+            for _ in range(5):  # another quickfix..
+                try:
+                    success = page_link(driver)
+                    break
+                except BaseException:
+                    print('paging error, will try again')
+                    success = False
+
+            if success:
+                print('Success paging %d' % page)
+                if NETWORK:
+                    data.append(get_results(driver))
+                    # clear log
+                    clear_log(driver)
+                links.update(get_profile_links(driver))
+            else:
+                print('Error paging %d' % page)
+                break
+
+    return data, links
+
+
+#### DATA COLLECTION FUNCTIONS BEGING ####
 def norm(val):
+    """FUnction for normalizing data"""
     if type(val) == str:
         return html.unescape(val)
     else:
@@ -160,8 +294,6 @@ def norm_d(d):
         new[key] = norm_master(val)
     return new
 
-# Extracting json data from hex encoded bytes in the network monitor
-
 
 def remove_https_transaction(text):
     # Removes invalid bytes from http transaction data.
@@ -178,7 +310,6 @@ def remove_https_transaction(text):
             is_http_transaction = False
     text = 'hex_encoded_bytes ='.join(temp)
     return text
-    #hex_text = ''.join(hex_re.findall(text))
 
 
 def get_results_json(driver):
@@ -194,7 +325,10 @@ def get_results_json(driver):
 
 
 def get_hex(driver):
-    driver.switch_to.window(windows['network_monitor'])
+    # define regular expression for extracting hex encoded bytes.
+    hex_re = re.compile(r'(?:[0-9A-F]{2} )+')
+
+    driver.switch_to.window(WINDOWS['network_monitor'])
     el = driver.find_element_by_id('events-view-details-log-box')
     text = el.text
     # process text to remove http transactions irrelevant to the json response
@@ -208,16 +342,8 @@ def HexToByte(hexStr):
     Convert a string hex byte values into a byte string. The Hex Byte values may
     or may not be space separated.
     """
-    # The list comprehension implementation is fractionally slower in this case
-    #
-    #    hexStr = ''.join( hexStr.split(" ") )
-    #    return ''.join( ["%c" % chr( int ( hexStr[i:i+2],16 ) ) \
-    #                                   for i in range(0, len( hexStr ), 2) ] )
-
     bytes = []
-
     hexStr = ''.join(hexStr.split(" "))
-
     for i in range(0, len(hexStr), 2):
         bytes.append(chr(int(hexStr[i:i + 2], 16)))
 
@@ -237,8 +363,8 @@ def quick_fix_json(string, edit_char):
 
 
 def recursive_quick_fix(string, max_iter=300):
-    "Tries to load a json string, and recursively ... or rather iteratively removes invalid characters"
-
+    """Tries to load a json string, and recursively...
+    or rather iteratively removes invalid characters"""
     for i in range(max_iter):
         try:
             d = json.loads(string)
@@ -251,6 +377,7 @@ def recursive_quick_fix(string, max_iter=300):
 
 
 def hex_load_json(hex_text):
+    mpa = range(32)
     after_hex = HexToByte(hex_text).translate(
         mpa)  # remove invalid characters in json
     after_hex = after_hex.rsplit('}', maxsplit=1)[
@@ -277,7 +404,7 @@ def hex_load_json(hex_text):
 
 
 def locate_xhr_response(driver, api_pattern='api/smartsearch'):
-    driver.switch_to.window(windows['network_monitor'])
+    driver.switch_to.window(WINDOWS['network_monitor'])
     # click on the xhr request
     found = False
     for i in range(3):  # reliability issues, will try again if no success
@@ -309,10 +436,9 @@ def get_results(driver, api_pattern='api/smartsearch'):
         print('error with parsing the results. Will try again')
         # will try again
         time.sleep(5)
-        response = locate_xhr_response(driver, api_pattern)
         data = get_results_json(driver)
     # switch back
-    driver.switch_to.window(windows['recruiter'])
+    driver.switch_to.window(WINDOWS['recruiter'])
     return data
 
 
@@ -323,14 +449,9 @@ def clear_log(driver):
     full_log_on(driver)
 
 
-# 'api/projects/recent?','groups?_=','companies?_=',
-# code id inner_html.
-# <!-- {'data'.... }-->
-
-
 #############################
 def get_profile_links(driver):
-    driver.switch_to.window(windows['recruiter'])
+    driver.switch_to.window(WINDOWS['recruiter'])
     source = driver.page_source
     links = set()
     for link in source.split('href="')[1:]:
@@ -348,7 +469,7 @@ def get_uid(link):
 ########## LEGACY PARSE ###########
 
 
-def parse_data_anders(driver, user_link):
+def parse_data_anders(driver):
     # LEGACY FUNCTION
 
     rand_sleep = random.randint(2, 4)
@@ -569,12 +690,11 @@ def parse_data_anders(driver, user_link):
 def parse_data_backend(driver, uid):
     print('Now getting backend api data')
     # get basic profile data in the html
-    driver.switch_to.window(windows['network_monitor'])
+    driver.switch_to.window(WINDOWS['network_monitor'])
     try:
         d = get_basic_profile_info(driver, uid)
     except BaseException:
         d = {}
-    # get extra connections: groups, companies etc.
 
     for typ in ['api/projects/recent?', 'groups?_=', 'companies?_=']:
         typ_name = typ.split('/')[-1].strip('_?')
@@ -605,7 +725,6 @@ def get_basic_profile_info(driver, uid):
         print('error with parsing the results. Will try again')
         # will try again
         time.sleep(5)
-        response = locate_xhr_response(driver, 'searchController=smartSearch')
         try:
             first_response = get_hex(driver)
             d = recursive_quick_fix(HexToByte(first_response).split(
@@ -618,213 +737,22 @@ def get_basic_profile_info(driver, uid):
     if len(d) > 0:
         print('success parsing api profile info.')
     return d
-
-######## DATA COLLECTION FUNCTIONS  END #######
-
-
-# Automated browsing of pages and searching.
-# Enter the Recruiter search domain.
-
-def start_recruiter_search(driver):
-    success = False
-    for button in driver.find_elements_by_tag_name('button'):
-        if button.text == 'Start a new search':
-            button.click()
-            success = True
-            break
-    return success
+#### DATA COLLECTION FUNCTOINS END ####
 
 
-def choose_custom_filter(driver, filter_name='denmark_only'):
-    if 'Filter is selected' in driver.page_source:
-        return
-    for el in driver.find_elements_by_tag_name('button'):
-        if 'Custom filters' in el.text:
-            el.click()
-
-    filter_on = False
-    for el in driver.find_elements_by_tag_name('button'):
-        try:
-            if filter_name == el.text:
-                el.click()
-                filter_on = True
-                break
-        except BaseException:
-            pass
-
-    if not filter_on:
-        # check if filter was already on:
-        if not 'Filter is selected' in driver.page_source:
-            input(
-                'Applying custom filter did not succeed, input it manually, and Press Enter')
-        # Should make a warning sound.
-
-
-def input_searchterm(driver, term, custom_filter='denmark_only'):
-    driver.switch_to.window(windows['recruiter'])
-    # try to enter the search.
-    success = False
-    for i in range(5):
-        try:
-            success = start_recruiter_search(driver)
-            break
-        except BaseException:
-            continue
-        if success:
-            break
-        else:
-            time.sleep(2)
-    # if not success:
-    #    input('Automation of search: %s failed. I need you to do it manually and press Enter when ready.'%term)
-    # check if filter was already on:
-   # if not 'Filter is selected' in driver.page_source:
-    #    choose_custom_filter(driver,custom_filter)
-    success = False
-    for el in driver.find_elements_by_tag_name('input'):
-        try:
-            el.clear()
-            el.send_keys(term)
-            el.submit()
-            success = True
-            break
-        except BaseException:
-            continue
-    time.sleep(2)
-    print('will now apply the following filter: %s' % custom_filter)
-    if not 'Filter is selected' in driver.page_source:
-        choose_custom_filter(driver, custom_filter)
-    if not success:
-        input('Automation of search failed. I need you to do it manually and press Enter when ready.')
-        return
-# for i in range(5):
-#    success = start_recruiter_search(driver)
-#    if not success:
-#        time.sleep(2)
-#    else:
-#        break
-# if not success:
-#    input('Press the start a new search button in the Chrome browser and then press Enter in the script')
-
-
-def page_link(driver):
-    driver.switch_to.window(windows['recruiter'])
-    success = False
-    for el in driver.find_elements_by_class_name('page-link'):
-        try:
-            title = el.get_attribute('title')
-        except BaseException:
-            title = ''
-        if 'next' in title.lower():
-            # print(title)
-            for i in range(5):
-                try:
-                    el.click()
-                    success = True
-                except BaseException:
-                    pass
-
-            if success:
-                break
-    return success
-
-
-def search_results(
-        driver,
-        term,
-        custom_filter='denmark_only',
-        user_defined=False):
-    print('Now collecting searchterm: %s' % term)
-    if not user_defined:
-
-        input_searchterm(driver, term, custom_filter)
-
-        #print('will just use current filter')
-    else:
-        input(
-            'Define your own custom search using the following term: %s\n and press Enter when ready.' %
-            term)
-
-    time.sleep(2)
-    #
-    links = get_profile_links(driver)
-
-    # get data
-    if network:
-        data = [get_results(driver)]
-        clear_log(driver)
-    else:
-        data = []
-    for page in range(int(n_search_results / 25)):
-        time.sleep(1)
-        for _ in range(5):  # another quickfix..
-            try:
-                success = page_link(driver)
-
-                break
-            except BaseException:
-                print('paging error, will try again')
-                success = False
-        if success:
-            print('Success paging %d' % page)
-            if network:
-                data.append(get_results(driver))
-                clear_log(driver)
-            links.update(get_profile_links(driver))
-        else:
-            print('Error paging %d' % page)
-
-            # break
-
-    # get data for no cap: ## GIVER DET MENING?
-    if term.lower() != term:
-        print('Now collecting searchterm(no_caps): %s' % term.lower())
-        if not user_defined:
-            input_searchterm(driver, term.lower())
-        else:
-            input(
-                'Define your own custom search using the following term: %s\n and press Enter when ready.' %
-                term.lower())
-
-        time.sleep(2)
-        links.update(get_profile_links(driver))
-        # get data
-        if network:
-            data.append(get_results(driver))
-            # clear_log
-            clear_log(driver)
-        for page in range(int(n_search_results / 25)):
-            time.sleep(1)
-            for _ in range(5):  # another quickfix..
-                try:
-                    success = page_link(driver)
-                    break
-                except BaseException:
-                    print('paging error, will try again')
-                    success = False
-
-            if success:
-                print('Success paging %d' % page)
-                if network:
-                    data.append(get_results(driver))
-                    # clear log
-                    clear_log(driver)
-                links.update(get_profile_links(driver))
-            else:
-                print('Error paging %d' % page)
-                break
-
-    return data, links
-
-
-def collect_data(terms):
+def collect_data(terms, driver, custom_filter, extended_user_profile, profiles_collected):
+    """
+    This function collects data.
+    """
     for term in terms:
         data, links = search_results(driver, term, custom_filter=custom_filter)
         # dump parsed data
-        with codecs.open('parsed_data/%s_%s_%r' % (term, custom_filter, time.time()), 'w', 'utf-8') as f:
-            json.dump([data, list(links)], f)
-            # get profile links
-            # Alternativ crawling strategy er at udnytte recruiter-søgningen og traversere det mere naturligt
-            # ved at trykke næste resultat i søgningen.
+        with codecs.open(f'parsed_data/{terms}_{custom_filter}_{time.time()}',
+                         'w', 'utf-8') as parse_file:
+            json.dump([data, list(links)], parse_file)
+            """Get profile links.
+            Alternativ crawling strategy er at udnytte recruiter-søgningen
+            og traversere det mere naturligt ed at trykke næste resultat i søgningen."""
         if extended_user_profile > 2:
             continue
         print('Now ready to collect %d links' % len(links))
@@ -833,10 +761,10 @@ def collect_data(terms):
             if uid in profiles_collected:
                 print('-', end='')
                 continue
-            driver.switch_to.window(windows['profiles'])
+            driver.switch_to.window(WINDOWS['profiles'])
 
             driver.get('https://www.linkedin.com' + link)
-            d = parse_data_anders(driver, link)
+            d = parse_data_anders(driver)
 
             # dump data
             with codecs.open('parsed_data/profile_data_%s_%s_%r' % (uid, custom_filter, time.time()), 'w', 'utf-8') as f:
@@ -845,11 +773,11 @@ def collect_data(terms):
             if extended_user_profile == 1:
 
                 # collect api data
-                if network:
+                if NETWORK:
                     d = parse_data_backend(driver, uid)
                     with codecs.open('parsed_data/profile_data_api_%s_%s_%r' % (uid, custom_filter, time.time()), 'w', 'utf-8') as f:
                         json.dump(d, f)
-            if network:
+            if NETWORK:
                 clear_log(driver)
             # dump
             # save log
@@ -860,181 +788,131 @@ def collect_data(terms):
             # write to profile_log
 
 
-###########STARTBLOCK1#######################
-n_search_results = 1000
-ia = input(
-    'Do you want to change current default value %d for number of search results? press y else Enter' %
-    n_search_results)
-if ia == 'y':
-    n_search_results = int(
+N_SEARCH_RESULTS = 1000
+IA = input(f'Do you want to change current default value {N_SEARCH_RESULTS} \
+for number of search results? press y else Enter')
+if IA == 'y':
+    N_SEARCH_RESULTS = int(
         input('Enter number of results pr search term here: '))
-######### Prerequisites ########
-# The script needs the following
-# - username and password, user will be prompted for that.
-# - a working selenium and chromedriver setup.
-# Prerequistites
-######### Prerequisites ########
-# The script needs the following
-# - username and password, user will be prompted for that.
-# - a working selenium and chromedriver setup.
+
 # create directories
 if not os.path.isdir('script_requisites'):
     os.mkdir('script_requisites')
 if not os.path.isdir('parsed_data'):
     os.mkdir('parsed_data')
-#########
-###########ENDBLOCK1#######################
 
-###########STARTBLOCK2#######################
+CHROME_PATH = "/usr/bin/chromedriver"
+DRIVER = Chrome(CHROME_PATH)
+DRIVER.get("https://www.linkedin.com/")
 
-###########ENDBLOCK2#######################
-
-###########STARTBLOCK3#######################
-chrome_path = "/usr/bin/chromedriver"
-###########ENDBLOCK3#######################
-
-###########STARTBLOCK4#######################
-selenium_problem = check_selenium_version()
-###########ENDBLOCK4#######################
-
-###########STARTBLOCK5#######################
-# Initialize browser/webdriver
-driver = Chrome(chrome_path)
-# make sure selenium is installed and updated.
-# Login to linkedin
-# Locate username and password input fields and send login info
-driver.get("https://www.linkedin.com/")
-###########ENDBLOCK5#######################
-
-###########STARTBLOCK6#######################
 input('Please log in manually, then press Enter when login is done.')
 
-###### Data Collection #####
-description = '''The program searches linkedin for searchterms defined in an external newline-separeted textfile (script_requisites/search_terms) or through user_input
-'''
 # load searchterms
-search_terms = 'script_requisites/search_terms'
-if os.path.isfile(search_terms):
-    terms = set([i.strip() for i in codecs.open(
-        search_terms, 'r', 'utf-8').read().split('\n')])
+SEARCH_TERMS = 'script_requisites/search_terms'
+if os.path.isfile(SEARCH_TERMS):
+    TERMS = codecs.open(SEARCH_TERMS, 'r', 'utf-8').read().split('\n')
+    TERMS = {i.strip() for i in TERMS}
     # remove blank searches
-    if '' in terms:
-        terms.remove('')
+    if '' in TERMS:
+        TERMS.remove('')
 else:
-    terms = set()
-print('%d unique terms in the search_term file.' % len(terms))
-# load search term log.
-###########ENDBLOCK6######################
-#
-###########STARTBLOCK7#######################
+    TERMS = set()
+print('%d unique terms in the search_term file.' % len(TERMS))
+
 if not os.path.isdir('logs'):
     os.mkdir('logs')
 # header should be ['term','t','delta_t','success']
-done_df = load_dataframe('logs/done_search.csv')
-done = set(done_df[done_df.success == 1].term)
-ia = input(
-    '%d are not yet collected. Do you want to manually add more press y Else Enter\n.' %
-    (len(
-        terms -
-        done)))
-if ia == 'y':
-    print(
-        '''You should now input searchterms. Copy in a newline separated list of terms here:
+DONE_DF = load_dataframe('logs/done_search.csv')
+DONE = set(DONE_DF[DONE_DF.success == 1].term)
+IA = input(
+    f'{(len(TERMS - DONE))}d are not yet collected. \
+Do you want to manually add more press y Else Enter\n.')
+if IA == 'y':
+    print('''You should now input searchterms. Copy in a newline separated list of terms here:
     The added terms to the search_terms file''')
-    new_terms = set(input('Input search terms here:\n').split('\n'))
-    terms.update(new_terms)
+    NEW_TERMS = set(input('Input search terms here:\n').split('\n'))
+    TERMS.update(NEW_TERMS)
 
 with codecs.open('script_requisites/search_terms', 'w', 'utf-8') as f:
-    f.write('\n'.join(terms))
+    f.write('\n'.join(TERMS))
     f.close()
 # ask if searches should be done again
-ia = input(
-    '%d terms are already collected. Do you want to run it again for updated data? press y, else press Enter.' %
-    (len(
-        done -
-        set(terms))))
-if ia == 'y':
+IA = input(f'{(len(DONE - set(TERMS)))}d terms are already collected. \
+Do you want to run it again for updated data? press y, else press Enter.')
+if IA == 'y':
     # sets done empty effectively allowing all queries to be rerun.
-    done = set()
-terms = set(terms - done)
+    DONE = set()
+TERMS = set(TERMS - DONE)
 
 # Ready to collect the search terms using both cap and uncapped words
 # turn on network monitor
-windows = {}
-###########ENDBLOCK7#######################
+WINDOWS = {}
 
-###########STARTBLOCK8#######################
 # Setup Network Logging
-network = False  # Turn this on if network logging should be included in the data
-if network:
-    network_monitor_on(driver)
-###########ENDBLOCK8#######################
+NETWORK = False  # Turn this on if network logging should be included in the data
+if NETWORK:
+    network_monitor_on(DRIVER)
 
-###########STARTBLOCK9#######################
 # open window for searching profiles
-open_profile_window(driver)
+open_profile_window(DRIVER)
 
 # Login to Recruiter Page
-found = False
-for el in driver.find_elements_by_tag_name('a'):
+FOUND = False
+for el in DRIVER.find_elements_by_tag_name('a'):
     if el.text == 'Recruiter':
         print('Found recruiter page')
         el.click()
-        found = True
+        FOUND = True
         break
-if not found:
+if not FOUND:
     input('Please press the recruiter button, and then press Enter')
 time.sleep(2)
 
-windows['recruiter'] = driver.window_handles[-1]
-driver.switch_to.window(windows['recruiter'])
-###########ENDBLOCK9#######################
+WINDOWS['recruiter'] = DRIVER.window_handles[-1]
+DRIVER.switch_to.window(WINDOWS['recruiter'])
 
-###########STARTBLOCK10#######################
-# define regular expression for extracting hex encoded bytes.
-hex_re = re.compile(r'(?:[0-9A-F]{2} )+')
-###########ENDBLOCK10#######################
-
-###########STARTBLOCK11#######################
-mpa = range(32)
-###########ENDBLOCK11#######################
-
-###########STARTBLOCK12#######################
 if not os.path.isfile('logs/profiles_collected'):
-    profiles_collected = set()
+    PROFILES_COLLECTED = set()
 else:
-    profiles_collected = set(json.load(open('logs/profiles_collected', 'r')))
+    PROFILES_COLLECTED = set(json.load(open('logs/profiles_collected', 'r')))
+
 ###### Get data from the search terms ####
 # User chooses for standard search within denmark or user defined.
-custom_filter = 'denmark_only'
-ia = input(
+CUSTOM_FILTER = 'denmark_only'
+IA = input(
     'Do you want to change the predefined filter %s? press y else Enter.' %
-    (custom_filter))
-if ia == 'y':
+    (CUSTOM_FILTER))
+if IA == 'y':
     while True:
-        custom_filter = input(
+        CUSTOM_FILTER = input(
             'Please input the name of a custom filter saved in the recruiter page.')
-        ia = input('Is the input correct? press Enter, else press n')
-        if ia != 'n':
+        IA = input('Is the input correct? press Enter, else press n')
+        if IA != 'n':
             break
 
 while True:
-    extended_user_profile = input(
-        '''Do you want to collect extended profile info (a lot slower, and at higher risk of getting caught)?
-    Press (1) for Collecting all, Double profile collections, full backend and the MUNK parse (Slowests)
-    Press (2) for Collecting User Profiles using Prof. MUNK's Parse.
+    EXTENDED_USER_PROFILE = input('''Do you want to collect extended profile \
+info (a lot slower, and at higher risk of getting caught)?
+    Press (1) for Collecting all, Double profile collections, \
+full backend and the MUNK parse (Slowests)
+    Press (2) for Collecting User Profiles using Prof. \
+MUNK's Parse.
     Press (3) for Collecting Only Profile intro from the Search (Fastests)
     ''')
-    if extended_user_profile in set(['1', '2', '3']):
-        extended_user_profile = int(extended_user_profile)
+    if EXTENDED_USER_PROFILE in {'1', '2', '3'}:
+        EXTENDED_USER_PROFILE = int(EXTENDED_USER_PROFILE)
         break
     else:
         print('Invalid input try again...')
 
 if not os.path.isfile('logs/profile_log.csv'):
-    logf = open('logs/profile_log.csv', 'w')
-    header = ['uid', 't', 'delta_t', 'length', 'extended']
-    logf.write(','.join(header))
+    LOGF = open('logs/profile_log.csv', 'w')
+    HEADER = ['uid', 't', 'delta_t', 'length', 'extended']
+    LOGF.write(','.join(HEADER))
 else:
-    logf = open('logs/profile_log.csv', 'a')
-###########ENDBLOCK12#######################
+    LOGF = open('logs/profile_log.csv', 'a')
+
+collect_data(TERMS, DRIVER, CUSTOM_FILTER,
+             EXTENDED_USER_PROFILE, PROFILES_COLLECTED)
+
+print("Success. Scraping finished.")
