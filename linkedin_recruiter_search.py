@@ -21,160 +21,6 @@ from zipfile import ZipFile
 from packaging import version
 
 
-def get_mask(mask_tokens):
-    """doc"""
-    global token_num
-    token = mask_tokens[token_num]
-    if len(set(token)) < 8:
-        token_num += 1
-        token = get_mask(mask_tokens)
-    token_num += 1
-    return token
-
-
-def mask_login(user, password):
-    """doc"""
-    global token_num
-    # mash login details with poetry
-    urls = [
-        'http://shakespeare.mit.edu/hamlet/hamlet.1.1.html',
-        'https://ocw.mit.edu/ans7870/6/6.006/s08/lecturenotes/files/t8.shakespeare.txt']
-    for url in urls:
-        try:
-            text = requests.get(url).text
-            with codecs.open('script_requisites/mask_poetry', 'w', 'utf-8') as f:
-                f.write(text)
-            break
-        except BaseException:
-            pass
-    mask_tokens = text.split()
-    token_num = 0
-    with codecs.open('script_requisites/a_u_t_h_details', 'w', 'utf-8') as f:
-        for char in user:
-            mask_token = list(get_mask(mask_tokens) + char)
-            random.shuffle(mask_token)
-            f.write(''.join(mask_token) + ' ')
-        f.write('\n\r')
-        for char in password:
-            mask_token = list(get_mask(mask_tokens) + char)
-            random.shuffle(mask_token)
-            f.write(''.join(mask_token) + ' ')
-
-
-def load_details():
-    """doc"""
-    global token_num
-    mask = codecs.open('script_requisites/mask_poetry', 'r', 'utf-8').read()
-    mask_tokens = mask.split()
-    f = codecs.open('script_requisites/a_u_t_h_details', 'r', 'utf-8')
-    user, password = f.read().split('\n\r')
-    token_num = 0
-    real_u, real_p = '', ''
-    for w in user.split():
-        mask_token = get_mask(mask_tokens)
-        c = Counter(w)
-        for char in mask_token:
-            c[char] -= 1
-        real_u += c.most_common(1)[0][0]
-    for w in password.split():
-        mask_token = get_mask(mask_tokens)
-        c = Counter(w)
-        for char in mask_token:
-            c[char] -= 1
-        real_p += c.most_common(1)[0][0]
-    return real_u, real_p
-
-
-def password_prompt():
-    """Get login details"""
-    print('Input your login details:\n')
-    user = input('username: \t')
-    password = input('password: \t')
-    ia = input('Are the details correct press Enter, else press n')
-    if ia == 'n':
-        password_prompt()
-    return user, password
-
-
-def get_auth_details():
-    """This function will load login details if present or prompt user for them."""
-    # check if auth file exists
-    if os.path.isfile('script_requisites/a_u_t_h_details'):
-        # Check if user wants to renew the login details
-        ia = input(
-            'We already have your login details stored. If you want to renew them press y, else Enter.\n')
-        if ia == 'y':
-            # Get login details
-            user, password = password_prompt()
-            # store the details in a masked way for security purposes.
-            mask_login(user, password)
-            # see if it matches
-            u, p = load_details()
-            if not (u, p) == (user, password):
-                print('hmm mask did not succeed will erase the file')
-                os.remove('script_requisites/a_u_t_h_details')
-        else:
-            user, password = load_details()
-
-    else:
-        user, password = password_prompt()
-        # store the details in a masked way for security purposes.
-        mask_login(user, password)
-        u, p = load_details()
-        if not (u, p) == (user, password):
-            print('hmm mask did not succeed will erase the file')
-            os.remove('script_requisites/a_u_t_h_details')
-
-    return user, password
-
-
-def get_version(link):
-    """
-    Import selenium and initialize browser
-    Install chrome
-    """
-    chrome_version = re.findall('(?:\d+\.?)+', link)[0]
-    parsed_version = version.parse(chrome_version)
-    return str(parsed_version)
-
-
-def download_latest_chrome():
-
-    # find link to latest version
-    response = requests.get('http://chromedriver.chromium.org/downloads')
-    html = response.text
-    links = re.findall(
-        r'https:\/\/chromedriver\.storage\.googleapis\.com\/index\.html\?path=[0-9.]*/',
-        html)
-    link = max(links, key=get_version)
-
-    chrome_version = get_version(link)
-
-    osname = sys.platform
-    if osname not in set(['win32', 'mac64', 'linux64']):
-        if osname == 'darwin':
-            osname = 'mac64'
-        if 'win' in osname:
-            osname = 'win32'
-        if osname == 'linux':
-            osname = 'linux64'
-
-    # create link from version and operating system name
-    zip_path = f'https://chromedriver.storage.googleapis.com/{chrome_version}/chromedriver_{osname}.zip'
-
-    #####
-    # This is just a hack to download the corrext driver
-    zip_path = 'https://chromedriver.storage.googleapis.com/77.0.3865.40/chromedriver_linux64.zip'
-    #####
-
-    # download driver.
-    response = urlopen(zip_path)
-    # unpack zip and dump chromedriver
-    myzipfile = ZipFile(BytesIO(response.read()))
-    download_path = 'script_requisites/'
-    myzipfile.extractall(path=download_path)
-
-
 # Inform user on potential problems with Selenium get_version
 def check_selenium_version():
     import selenium
@@ -1040,7 +886,7 @@ if not os.path.isdir('parsed_data'):
 ###########ENDBLOCK1#######################
 
 ###########STARTBLOCK2#######################
-u, p = get_auth_details()
+
 ###########ENDBLOCK2#######################
 
 ###########STARTBLOCK3#######################
@@ -1061,11 +907,7 @@ driver.get("https://www.linkedin.com/")
 ###########ENDBLOCK5#######################
 
 ###########STARTBLOCK6#######################
-try:
-    login(driver, u, p)
-except BaseException:
-    print('Login was unsuccesful, do it manually or rerun the script and change the login info.')
-    input('Press Enter when login is done.')
+input('Please log in manually, then press Enter when login is done.')
 
 ###### Data Collection #####
 description = '''The program searches linkedin for searchterms defined in an external newline-separeted textfile (script_requisites/search_terms) or through user_input
