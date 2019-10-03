@@ -1,0 +1,208 @@
+######## DATA COLLECTION FUNCTIONS #######
+# FUnction for normalizing data
+
+
+def norm(val):
+    if type(val) == str:
+        return html.unescape(val)
+    else:
+        return val
+
+
+def norm_master(obj):
+    if type(obj) == dict:
+        return norm_d(obj)
+    elif type(obj) == list:
+        return norm_l(obj)
+    else:
+        return norm(obj)
+
+
+def norm_l(l):
+    new = []
+    for val in l:
+        new.append(norm_master(val))
+    return new
+
+
+def norm_d(d):
+    new = {}
+    for key, val in d.items():
+        new[key] = norm_master(val)
+    return new
+
+
+# Extracting json data from hex encoded bytes in the network monitor
+# define regular expression for extracting hex encoded bytes.
+hex_re = re.compile(r'(?:[0-9A-F]{2} )+')
+
+
+def remove_https_transaction(text):
+    # Removes invalid bytes from http transaction data.
+    temp = []
+    is_http_transaction = True
+    for batch in text.split('hex_encoded_bytes =')[1:]:
+        if not is_http_transaction:
+            # add batch to final string.
+            temp.append(batch)
+
+        if 'HTTP_TRANSACTION_READ_BODY' in batch:
+            is_http_transaction = True
+        else:
+            is_http_transaction = False
+    text = 'hex_encoded_bytes ='.join(temp)
+    return text
+    #hex_text = ''.join(hex_re.findall(text))
+
+
+def get_results_json(driver):
+    # extracts hex encoded json
+    hex_text = get_hex(driver)
+    print(len(hex_text))
+    # transforms hex encoded json and loads it
+    if len(hex_text) == 0:
+        print('No hex data... Error not fixed.')
+        return {}
+    data = hex_load_json(hex_text)
+    return data
+
+
+def get_hex(driver):
+    driver.switch_to.window(windows['network_monitor'])
+    el = driver.find_element_by_id('events-view-details-log-box')
+    text = el.text
+    # process text to remove http transactions irrelevant to the json response
+    text = remove_https_transaction(text)
+    hex_text = ''.join(hex_re.findall(text))
+    return hex_text
+
+
+def HexToByte(hexStr):
+    """
+    Convert a string hex byte values into a byte string. The Hex Byte values may
+    or may not be space separated.
+    """
+    # The list comprehension implementation is fractionally slower in this case
+    #
+    #    hexStr = ''.join( hexStr.split(" ") )
+    #    return ''.join( ["%c" % chr( int ( hexStr[i:i+2],16 ) ) \
+    #                                   for i in range(0, len( hexStr ), 2) ] )
+
+    bytes = []
+
+    hexStr = ''.join(hexStr.split(" "))
+
+    for i in range(0, len(hexStr), 2):
+        bytes.append(chr(int(hexStr[i:i + 2], 16)))
+
+    return ''.join(bytes)
+
+
+def get_char_span(e):
+    char = re.findall('char ([0-9]+)', str(e))
+    if len(char) > 0:
+        return int(char[0])
+    else:
+        return None
+
+
+mpa = range(32)
+
+
+def quick_fix_json(string, edit_char):
+    return ''.join([string[0:edit_char], string[edit_char + 1:]])
+
+
+def recursive_quick_fix(string, max_iter=300):
+    "Tries to load a json string, and recursively ... or rather iteratively removes invalid characters"
+
+    for i in range(max_iter):
+        try:
+            d = json.loads(string)
+
+            return d
+        except Exception as e:
+            w = get_char_span(str(e))
+            string = quick_fix_json(string, w)
+    return {}
+
+
+def hex_load_json(hex_text):
+    after_hex = HexToByte(hex_text).translate(
+        mpa)  # remove invalid characters in json
+    after_hex = after_hex.rsplit('}', maxsplit=1)[
+        0] + '}'  # locate end of json
+    found = False
+    for i in range(min([len(after_hex), 50])):
+        if after_hex[i] != '{':  # Look for where the json starts
+            continue
+        else:
+            try:
+                d = json.loads(after_hex[i:])
+                found = True
+                break
+            except BaseException:
+                pass
+    if found:
+        return norm_master(d)
+    else:
+        # locate beginning of json.
+        s = '{"' + after_hex.split('{"', maxsplit=1)[1]
+        return norm_master(recursive_quick_fix(s))
+# Master Functions for getting the data #######3
+# new function for getting the data using hex encoding
+
+
+def locate_xhr_response(driver, api_pattern='api/smartsearch'):
+    driver.switch_to.window(windows['network_monitor'])
+    # click on the xhr request
+    found = False
+    for i in range(3):  # reliability issues, will try again if no success
+        if found:
+            break
+        for el in driver.find_elements_by_tag_name('tr'):
+            text = el.text
+            class_ = el.get_attribute('class')
+            if 'source-url-request' in class_:
+                if api_pattern in text:
+                    print('Local api request located..')
+                    found = True
+                    el.click()
+                    break
+    return found
+
+
+def get_results(driver, api_pattern='api/smartsearch'):
+    print('Locating the xhr data in the network log')
+    # click on smart_search result
+    success = locate_xhr_response(driver, api_pattern=api_pattern)
+    if not success:
+        print('Error locating xhr response.')
+        return {}
+    time.sleep(3)
+    # locates and parses the hex encoded bytes as json.
+    data = get_results_json(driver)
+    if len(data) == 0:
+        print('error with parsing the results. Will try again')
+        # will try again
+        time.sleep(5)
+        response = locate_xhr_response(driver, api_pattern)
+        data = get_results_json(driver)
+    # switch back
+    driver.switch_to.window(windows['recruiter'])
+    return data
+
+
+def clear_log(driver):
+    # clear log and re-setup monitoring
+    print('Results succesfully located, will now clear log.')
+    clear_network_monitor(driver)
+    full_log_on(driver)
+
+
+# 'api/projects/recent?','groups?_=','companies?_=',
+# code id inner_html.
+# <!-- {'data'.... }-->
+
+
+#############################
