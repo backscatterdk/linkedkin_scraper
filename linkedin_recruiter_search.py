@@ -816,50 +816,6 @@ def search_results(
     return data, links
 
 
-def collect_data(terms):
-    for term in terms:
-        data, links = search_results(driver, term, custom_filter=custom_filter)
-        # dump parsed data
-        with codecs.open('parsed_data/%s_%s_%r' % (term, custom_filter, time.time()), 'w', 'utf-8') as f:
-            json.dump([data, list(links)], f)
-            # get profile links
-            # Alternativ crawling strategy er at udnytte recruiter-søgningen og traversere det mere naturligt
-            # ved at trykke næste resultat i søgningen.
-        if extended_user_profile > 2:
-            continue
-        print('Now ready to collect %d links' % len(links))
-        for link in tqdm.tqdm(list(links)):
-            uid = get_uid(link)
-            if uid in profiles_collected:
-                print('-', end='')
-                continue
-            driver.switch_to.window(windows['profiles'])
-
-            driver.get('https://www.linkedin.com' + link)
-            d = parse_data_anders(driver, link)
-
-            # dump data
-            with codecs.open('parsed_data/profile_data_%s_%s_%r' % (uid, custom_filter, time.time()), 'w', 'utf-8') as f:
-                json.dump(d, f)
-
-            if extended_user_profile == 1:
-
-                # collect api data
-                if network:
-                    d = parse_data_backend(driver, uid)
-                    with codecs.open('parsed_data/profile_data_api_%s_%s_%r' % (uid, custom_filter, time.time()), 'w', 'utf-8') as f:
-                        json.dump(d, f)
-            if network:
-                clear_log(driver)
-            # dump
-            # save log
-            profiles_collected.add(get_uid(link))
-            json.dump(
-                list(profiles_collected), open(
-                    'logs/profiles_collected', 'w'))
-            # write to profile_log
-
-
 ###########STARTBLOCK1#######################
 n_search_results = 1000
 ia = input(
@@ -1030,7 +986,6 @@ while True:
         break
     else:
         print('Invalid input try again...')
-
 if not os.path.isfile('logs/profile_log.csv'):
     logf = open('logs/profile_log.csv', 'w')
     header = ['uid', 't', 'delta_t', 'length', 'extended']
@@ -1038,3 +993,45 @@ if not os.path.isfile('logs/profile_log.csv'):
 else:
     logf = open('logs/profile_log.csv', 'a')
 ###########ENDBLOCK12#######################
+print(terms)
+for term in terms:
+    data, links = search_results(driver, term, custom_filter=custom_filter)
+    # dump parsed data
+    with codecs.open('parsed_data/%s_%s_%r' % (term, custom_filter, time.time()), 'w', 'utf-8') as f:
+        json.dump([data, list(links)], f)
+        # get profile links
+        # Alternativ crawling strategy er at udnytte recruiter-søgningen og traversere det mere naturligt
+        # ved at trykke næste resultat i søgningen.
+    if extended_user_profile > 2:
+        continue
+    print('Now ready to collect %d links' % len(links))
+    for link in tqdm.tqdm(list(links)):
+        uid = get_uid(link)
+        if uid in profiles_collected:
+            print('-', end='')
+            continue
+        driver.switch_to.window(windows['profiles'])
+
+        driver.get('https://www.linkedin.com' + link)
+        d = parse_data_anders(driver, link)
+
+        # dump data
+        with codecs.open('parsed_data/profile_data_%s_%s_%r' % (uid, custom_filter, time.time()), 'w', 'utf-8') as f:
+            json.dump(d, f)
+
+        if extended_user_profile == 1:
+
+            # collect api data
+            if network:
+                d = parse_data_backend(driver, uid)
+                with codecs.open('parsed_data/profile_data_api_%s_%s_%r' % (uid, custom_filter, time.time()), 'w', 'utf-8') as f:
+                    json.dump(d, f)
+        if network:
+            clear_log(driver)
+        # dump
+        # save log
+        profiles_collected.add(get_uid(link))
+        json.dump(
+            list(profiles_collected), open(
+                'logs/profiles_collected', 'w'))
+        # write to profile_log
