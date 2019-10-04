@@ -19,6 +19,7 @@ from selenium.webdriver.common.keys import Keys
 from io import BytesIO
 from zipfile import ZipFile
 from packaging import version
+from pathlib import Path
 
 
 # Inform user on potential problems with Selenium get_version
@@ -815,6 +816,16 @@ def search_results(
 
     return data, links
 
+def save_entire_html(driver, user_id, time):
+    #returns the inner HTML as a string
+    inner_html = driver.execute_script("return document.body.innerHTML")
+    html_dir = Path("full_htmls/")
+    html_dir.mkdir(exist_ok=True)
+    file_name = f'fullhtml_{user_id}_{time}.html'
+    file_path  = html_dir / file_name
+    with file_path.open('w', encoding='utf8') as f:
+        f.write(inner_html)
+
 
 ###########STARTBLOCK1#######################
 n_search_results = 1000
@@ -993,7 +1004,7 @@ if not os.path.isfile('logs/profile_log.csv'):
 else:
     logf = open('logs/profile_log.csv', 'a')
 ###########ENDBLOCK12#######################
-print(terms)
+
 for term in terms:
     data, links = search_results(driver, term, custom_filter=custom_filter)
     # dump parsed data
@@ -1015,6 +1026,8 @@ for term in terms:
         driver.get('https://www.linkedin.com' + link)
         d = parse_data_anders(driver, link)
 
+        save_entire_html(driver, uid, time.time())
+
         # dump data
         with codecs.open('parsed_data/profile_data_%s_%s_%r' % (uid, custom_filter, time.time()), 'w', 'utf-8') as f:
             json.dump(d, f)
@@ -1023,7 +1036,7 @@ for term in terms:
 
             # collect api data
             if network:
-                d = parse_data_backend(driver, uid)
+                d = parse_data_backend(driver, uid, time)
                 with codecs.open('parsed_data/profile_data_api_%s_%s_%r' % (uid, custom_filter, time.time()), 'w', 'utf-8') as f:
                     json.dump(d, f)
         if network:
